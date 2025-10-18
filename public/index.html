@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>歴史解説.pdf</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+#chatArea { display:flex; flex-direction:column; overflow:auto; height:100%; padding-bottom:1rem; }
+.message { padding:0.5rem; border-radius:0.5rem; max-width:60%; margin-bottom:0.25rem; word-break:break-word; }
+.self { background-color:#3b82f6; align-self:flex-end; }
+.other { background-color:#374151; align-self:flex-start; }
+</style>
+</head>
+<body class="bg-gray-800 text-white h-screen">
+<div class="flex h-full">
+  <!-- サイドバー -->
+  <div class="w-64 bg-gray-900 p-4 flex flex-col">
+    <h1 class="text-xl mb-2">Users Online</h1>
+    <div id="userCount" class="text-green-400 mb-4"></div>
+    <input type="text" id="searchInput" placeholder="Search messages" class="p-1 mb-1 rounded bg-gray-700"/>
+    <button id="searchBtn" class="bg-blue-500 px-2 py-1 rounded mb-2">Search</button>
+  </div>
+
+  <!-- チャットメイン -->
+  <div class="flex-1 flex flex-col">
+    <div id="chatArea" class="flex-1 overflow-auto p-4"></div>
+    <div id="typing" class="p-2 text-sm text-gray-400"></div>
+    <div class="p-2 bg-gray-700 flex items-center space-x-2">
+      <input type="file" id="fileInput" class="rounded bg-gray-600 p-1"/>
+      <input type="text" id="messageInput" placeholder="Type a message..." class="flex-1 p-2 rounded bg-gray-600"/>
+      <button id="sendBtn" class="bg-blue-500 px-4 py-2 rounded">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// -------------------- 初期設定 --------------------
+const socket = io(location.origin);
+let token = localStorage.getItem('token');
+let username = localStorage.getItem('username');
+let userId = localStorage.getItem('

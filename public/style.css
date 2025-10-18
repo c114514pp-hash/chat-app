@@ -1,0 +1,154 @@
+/* 全体背景とフォント */
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #2f3136;
+  color: #ffffff;
+  height: 100vh;
+  margin: 0;
+}
+
+/* サイドバー */
+.sidebar {
+  width: 16rem;
+  background-color: #202225;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+.sidebar h1 {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.sidebar input[type="text"] {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  background-color: #2f3136;
+  color: #fff;
+  border: none;
+}
+
+.sidebar button {
+  margin-top: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  background-color: #5865f2;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+.sidebar button:hover {
+  background-color: #4752c4;
+}
+
+/* チャットエリア */
+#chatArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: #202225 #2f3136;
+}
+
+/* スクロールバー (Webkit) */
+#chatArea::-webkit-scrollbar {
+  width: 8px;
+}
+#chatArea::-webkit-scrollbar-track {
+  background: #2f3136;
+}
+#chatArea::-webkit-scrollbar-thumb {
+  background-color: #202225;
+  border-radius: 4px;
+}
+
+/* メッセージ */
+.message {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  max-width: 60%;
+  margin-bottom: 0.25rem;
+  word-break: break-word;
+  position: relative;
+  font-size: 0.875rem;
+}
+
+.self {
+  background-color: #5865f2;
+  align-self: flex-end;
+}
+
+.other {
+  background-color: #36393f;
+  align-self: flex-start;
+}
+
+/* メッセージのファイル添付 */
+.message img {
+  max-width: 150px;
+  border-radius: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.message a {
+  color: #00b0f4;
+  text-decoration: underline;
+}
+
+/* 編集・削除ボタン */
+.message button {
+  font-size: 0.7rem;
+  margin-top: 0.25rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  border: none;
+  cursor: pointer;
+}
+
+.message button.edit {
+  background-color: #4f545c;
+  color: #fff;
+}
+
+.message button.delete {
+  background-color: #ed4245;
+  color: #fff;
+  margin-left: 0.25rem;
+}
+
+.message button:hover {
+  opacity: 0.8;
+}
+
+/* 入力フォーム */
+#messageInput, #fileInput {
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+  background-color: #40444b;
+  color: #fff;
+  border: none;
+}
+
+#sendBtn {
+  background-color: #5865f2;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+#sendBtn:hover {
+  background-color: #4752c4;
+}
+
+/* タイピング表示 */
+#typing {
+  padding: 0.25rem 0.5rem;
+  color: #b9bbbe;
+  font-size: 0.75rem;
+}
