@@ -1,132 +1,189 @@
 // backend/server.js
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import session from 'express-session';
-import cors from 'cors';
-import multer from 'multer';
-import path from 'path';
-import pg from 'pg';
-import bcrypt from 'bcrypt';
-import crypto from 'crypto';
+
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const { Pool } = require('pg');
+const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
+const http = require('http');
+const { Server } = require('socket.io');
+const bcrypt = require('bcrypt');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server);
 
-const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// 環境変数
+const PORT = process.env.PORT || 3000;
+const DATABASE_URL = process.env.DATABASE_URL;
 
-const upload = multer({ dest: 'uploads/' });
+// PostgreSQL 接続
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-app.use(cors({ origin: '*', credentials: true }));
+// ミドルウェア
+app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use(session({
-  secret: 'secret_key',
-  resave: false,
-  saveUninitialized: false,
-}));
+app.use(express.static(path.join(__dirname, '../public')));
 
-// --- 認証 ---
+// -------------------------------------------
+// ファイルアップロード設定
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+const upload = multer({ storage });
+
+// -------------------------------------------
+// トークン認証
 const generateToken = () => crypto.randomBytes(16).toString('hex');
 
-app.post('/api/register', async (req, res) => {
-  const { username, password } = req.body;
-  const hash = await bcrypt.hash(password, 10);
-  await pool.query('INSERT INTO users (username, password) VALUES ($1, $2)', [username, hash]);
-  res.json({ success: true });
-});
-
-app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
-  const result = await pool.query('SELECT * FROM users WHERE username=$1', [username]);
-  if(result.rows.length === 0) return res.json({ success: false });
-  const user = result.rows[0];
-  const match = await bcrypt.compare(password, user.password);
-  if(match){
-    const token = generateToken();
-    await pool.query('UPDATE users SET token=$1 WHERE id=$2', [token, user.id]);
-    return res.json({ success: true, token, username: user.username, userId: user.id });
-  }
-  res.json({ success: false });
-});
-
-app.post('/api/logout', (req,res)=>{
-  req.session.destroy(()=>{ res.json({ success:true })});
-});
-
-const authMiddleware = async (req,res,next)=>{
+const authMiddleware = async (req, res, next) => {
   const token = req.headers['authorization'];
-  if(!token) return res.status(401).send('Unauthorized');
-  const result = await pool.query('SELECT * FROM users WHERE token=$1', [token]);
-  if(result.rows.length === 0) return res.status(401).send('Unauthorized');
-  req.user = result.rows[0];
+  if (!token) return res.status(401).json({ success: false, message: 'No token' });
+  const user = await pool.query('SELECT * FROM users WHERE token=$1', [token]);
+  if (!user.rows[0]) return res.status(401).json({ success: false, message: 'Invalid token' });
+  req.user = user.rows[0];
   next();
 };
 
-// --- メッセージ送信・編集・削除 ---
-app.post('/api/message', authMiddleware, upload.single('file'), async (req,res)=>{
+// -------------------------------------------
+// トップページ
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// -------------------------------------------
+// ユーザー登録
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.json({ success: false, message: 'Missing fields' });
+
+  const hashed = await bcrypt.hash(password, 10);
+  try {
+    const result = await pool.query(
+      'INSERT INTO users(username, password) VALUES($1,$2) RETURNING id',
+      [username, hashed]
+    );
+    res.json({ success: true, userId: result.rows[0].id });
+  } catch (e) {
+    res.json({ success: false, message: 'Username taken' });
+  }
+});
+
+// -------------------------------------------
+// ログイン
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  const result = await pool.query('SELECT * FROM users WHERE username=$1', [username]);
+  if (!result.rows[0]) return res.json({ success: false, message: 'User not found' });
+
+  const match = await bcrypt.compare(password, result.rows[0].password);
+  if (!match) return res.json({ success: false, message: 'Wrong password' });
+
+  const token = generateToken();
+  await pool.query('UPDATE users SET token=$1 WHERE id=$2', [token, result.rows[0].id]);
+
+  res.json({ success: true, token, userId: result.rows[0].id });
+});
+
+// -------------------------------------------
+// メッセージ送信
+app.post('/api/message', authMiddleware, upload.single('file'), async (req, res) => {
+  const text = req.body.text || '';
+  let filePath = null;
+  if (req.file) filePath = '/uploads/' + req.file.filename;
+
+  const result = await pool.query(
+    'INSERT INTO messages(user_id,text,file) VALUES($1,$2,$3) RETURNING *',
+    [req.user.id, text, filePath]
+  );
+
+  const msg = result.rows[0];
+  const username = req.user.username;
+  io.emit('new_message', { ...msg, username });
+  res.json({ success: true });
+});
+
+// -------------------------------------------
+// メッセージ編集
+app.put('/api/message/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
   const { text } = req.body;
-  const file = req.file ? `/uploads/${req.file.filename}` : null;
-  const timestamp = new Date();
-  const result = await pool.query(
-    'INSERT INTO messages (user_id, text, file, created_at) VALUES ($1,$2,$3,$4) RETURNING *',
-    [req.user.id, text, file, timestamp]
-  );
-  const msg = { ...result.rows[0], username: req.user.username };
-  io.emit('new_message', msg);
-  res.json(msg);
+
+  const msgRes = await pool.query('SELECT * FROM messages WHERE id=$1', [id]);
+  if (!msgRes.rows[0]) return res.status(404).json({ success: false });
+  if (msgRes.rows[0].user_id !== req.user.id) return res.status(403).json({ success: false });
+
+  await pool.query('UPDATE messages SET text=$1 WHERE id=$2', [text, id]);
+  io.emit('edit_message', { id, text });
+  res.json({ success: true });
 });
 
-app.put('/api/message/:id', authMiddleware, async (req,res)=>{
-  const { text } = req.body;
-  const msgId = req.params.id;
-  const result = await pool.query(
-    'UPDATE messages SET text=$1 WHERE id=$2 AND user_id=$3 RETURNING *',
-    [text, msgId, req.user.id]
-  );
-  if(result.rows.length > 0) io.emit('edit_message', result.rows[0]);
-  res.json(result.rows[0]);
+// -------------------------------------------
+// メッセージ削除
+app.delete('/api/message/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+
+  const msgRes = await pool.query('SELECT * FROM messages WHERE id=$1', [id]);
+  if (!msgRes.rows[0]) return res.status(404).json({ success: false });
+  if (msgRes.rows[0].user_id !== req.user.id) return res.status(403).json({ success: false });
+
+  await pool.query('DELETE FROM messages WHERE id=$1', [id]);
+  io.emit('delete_message', parseInt(id));
+  res.json({ success: true });
 });
 
-app.delete('/api/message/:id', authMiddleware, async (req,res)=>{
-  const msgId = req.params.id;
-  const result = await pool.query(
-    'DELETE FROM messages WHERE id=$1 AND user_id=$2 RETURNING *',
-    [msgId, req.user.id]
-  );
-  if(result.rows.length > 0) io.emit('delete_message', msgId);
-  res.json(result.rows[0]);
+// -------------------------------------------
+// 過去メッセージ取得（検索・無限スクロール対応）
+app.get('/api/messages', authMiddleware, async (req, res) => {
+  let { offset, limit, search } = req.query;
+  offset = parseInt(offset) || 0;
+  limit = parseInt(limit) || 50;
+
+  let query = 'SELECT messages.*, users.username FROM messages JOIN users ON messages.user_id=users.id';
+  const params = [];
+  if (search) {
+    query += ' WHERE text ILIKE $1';
+    params.push(`%${search}%`);
+  }
+  query += ' ORDER BY id ASC OFFSET $2 LIMIT $3';
+  params.push(offset, limit);
+
+  const msgs = await pool.query(query, params);
+  res.json(msgs.rows);
 });
 
-// --- 過去ログ取得（無限スクロール対応） ---
-app.get('/api/messages', authMiddleware, async (req,res)=>{
-  const { offset=0, limit=50, search='' } = req.query;
-  const result = await pool.query(`
-    SELECT m.*, u.username
-    FROM messages m
-    JOIN users u ON m.user_id=u.id
-    WHERE m.text ILIKE $3
-    ORDER BY m.created_at ASC
-    OFFSET $1 LIMIT $2
-  `, [offset, limit, `%${search}%`]);
-  res.json(result.rows);
-});
-
-// --- 参加人数 ---
-let onlineUsers = 0;
+// -------------------------------------------
+// WebSocket
+let usersOnline = 0;
 io.on('connection', socket => {
-  onlineUsers++;
-  io.emit('user_count', onlineUsers);
+  usersOnline++;
+  io.emit('user_count', usersOnline);
 
-  socket.on('typing', username => socket.broadcast.emit('typing', username));
+  socket.on('disconnect', () => {
+    usersOnline--;
+    io.emit('user_count', usersOnline);
+  });
 
-  socket.on('disconnect', ()=>{
-    onlineUsers--;
-    io.emit('user_count', onlineUsers);
+  socket.on('typing', username => {
+    socket.broadcast.emit('typing', username);
   });
 });
 
-server.listen(process.env.PORT || 3000, ()=>console.log('Server running'));
+// -------------------------------------------
+// サーバー起動
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
